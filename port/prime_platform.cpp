@@ -377,29 +377,32 @@ extern "C" __attribute__((naked)) void prime_slot_patch(void* dst,
 
 /* 固件输入线程调用：先让固件填事件，再解码 */
 extern "C" void prime_input_hook(void* evp) {
-    unsigned* b = reinterpret_cast<unsigned*>(evp);
+    /* 路线 A(primetcc/DOOM/nbCode) 的事件布局，和 Upsilon 的 ui_event 不同：
+     *   type  @ +4   (0x00100010 按键, 15 触摸)
+     *   按键:  state @ +28 (16 按下 / 0x100000 抬起), scan @ +34 (u16)
+     *   触摸:  count @ +24 (u16), item i @ 28+12i: action @ +0 (1/2/8) */
+    unsigned char* e = reinterpret_cast<unsigned char*>(evp);
     if (!prime_get_event(evp)) {
         return;
     }
-    const unsigned type = b[7];
-    if (type == 0x10U) {
-        const InputEvent e = map_scan_code(b[8] >> 16U);
-        if (e.type != InputEventType::None) {
-            g_pending = static_cast<int>(e.type);
+    const std::uint32_t type = *reinterpret_cast<std::uint32_t*>(e + 4);
+    if (type == 0x00100010U) {
+        const std::uint32_t state = *reinterpret_cast<std::uint32_t*>(e + 28);
+        const unsigned scan = *reinterpret_cast<unsigned short*>(e + 34);
+        if (state == 16U) {                     /* press (release = 0x100000) */
+            const InputEvent ev = map_scan_code(scan);
+            if (ev.type != InputEventType::None) {
+                g_pending = static_cast<int>(ev.type);
+            }
         }
-    } else if (type == 0x1U) {
-        g_touch_down = 1;
-        g_tx0 = static_cast<int>(b[8] >> 16U);
-        g_ty0 = static_cast<int>(b[9]);
-    } else if (type == 0x8U && g_touch_down) {
-        const int dx = static_cast<int>(b[8] >> 16U) - g_tx0;
-        const int dy = static_cast<int>(b[9]) - g_ty0;
-        g_touch_down = 0;
-        if (dx < -30)      g_pending = static_cast<int>(InputEventType::ScrollLineDown);
-        else if (dx > 30)  g_pending = static_cast<int>(InputEventType::ScrollLineUp);
-        else if (dy > 30)  g_pending = static_cast<int>(InputEventType::ScrollLineDown);
-        else if (dy < -30) g_pending = static_cast<int>(InputEventType::ScrollLineUp);
-        else               g_pending = static_cast<int>(InputEventType::Activate);
+    } else if (type == 15U) {                   /* touch */
+        const unsigned count = *reinterpret_cast<unsigned short*>(e + 24);
+        if (count > 0) {
+            const std::uint32_t action = *reinterpret_cast<std::uint32_t*>(e + 28);
+            if (action == 1U) {                 /* press */
+                g_pending = static_cast<int>(InputEventType::Activate);
+            }
+        }
     }
 }
 
