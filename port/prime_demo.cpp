@@ -115,6 +115,7 @@ extern "C" int prime_render_demo_page(void) {
  * eventg1 main() 同款: 在 call 上下文直接 OSCreateThread 事件线程,
  * SetSystemVariable(85,2,1), 然后主线程轮询共享事件状态并做自己的工作。 */
 extern "C" void* demo_main(void* arg);
+static volatile int g_demo_done;
 
 /* 入口只做"校验 + 起线程"：调试调用上下文的栈很小，初始化 FreeType/HarfBuzz
  * 会在入口直接溢出复位。主循环放到带显式栈大小的线程里（eventg1/doom 同款）。 */
@@ -124,11 +125,17 @@ extern "C" void* app_entry_c(PrimeBootConfig* cfg) {
     }
     prime_set_services(reinterpret_cast<const PrimeServices*>(
         static_cast<std::uintptr_t>(cfg->services)));
+    g_demo_done = 0;
     void* thr = prime_os_create_thread(reinterpret_cast<void*>(&demo_main), cfg,
                                        96u * 1024u, 0u);
     if (thr == nullptr) {
         /* 线程创建失败: 退回调用上下文执行（可能复位，但至少能跑） */
         return demo_main(cfg);
+    }
+    /* 不能立刻返回: 启动器会在返回后释放/复用映像，而线程还在跑。
+     * 等主循环结束（demo_main 末尾置 g_demo_done）。 */
+    while (!g_demo_done) {
+        prime_os_sleep(50);
     }
     return nullptr;
 }
@@ -245,5 +252,6 @@ extern "C" void* demo_main(void* arg) {
 
     clear_screen_on_exit();
     prime_log_write("PrimeTeX 演示结束\n");
+    g_demo_done = 1;
     return prime_log_struct();
 }
