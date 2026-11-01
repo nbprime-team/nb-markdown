@@ -131,6 +131,21 @@ static void input_restore(void) {
 
 /* 入口只做"校验 + 起线程"：调试调用上下文的栈很小，初始化 FreeType/HarfBuzz
  * 会在入口直接溢出复位。主循环放到带显式栈大小的线程里（eventg1/doom 同款）。 */
+extern "C" void* malloc(unsigned size);
+
+/* 入口线程内切到自备栈：事件在入口线程分发，栈又不能太小。 */
+extern "C" __attribute__((naked)) void* run_on_stack(void* sp, void* arg) {
+    (void)sp; (void)arg;
+    __asm__ volatile(
+        "push {r4, r5, r6, r7, r8, r9, r10, r11, ip, lr}\n"
+        "mov  r4, sp\n"
+        "mov  sp, r0\n"
+        "mov  r0, r1\n"
+        "bl   demo_main\n"
+        "mov  sp, r4\n"
+        "pop  {r4, r5, r6, r7, r8, r9, r10, r11, ip, pc}\n");
+}
+
 extern "C" void* app_entry_c(PrimeBootConfig* cfg) {
     if (cfg == nullptr || cfg->magic != 0xD00BC760u) {
         return nullptr;
