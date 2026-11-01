@@ -1,0 +1,371 @@
+# Makefile.upsilon — PrimeMarkdown Upsilon external app 构建 (路线 B)
+# =============================================================
+# 产物: build/upsilon/primemarkdown.elf  (部署到计算器 c:\apps\primemarkdown.elf)
+# 链接形态: g1app.ld (0x30900000, 6M) + ENTRY(AppMain) + libsyscalls
+#   + newlib libc + libstdc++ (besta_fixes.cc 提供 BSS 清零/heap 初始化/stubs)
+# 事件: Upsilon 形态 GetEvent 事件线程 (chess/doom 同款, 真机验证有效)
+# 用法:
+#   make -f Makefile.upsilon TOOLCHAIN_ROOT=/tmp/armtc/root   # 构建
+#   make -f Makefile.upsilon check TOOLCHAIN_ROOT=/tmp/armtc/root
+#   make -f Makefile.upsilon clean
+# 系统级安装工具链时直接 make -f Makefile.upsilon。
+
+# ---------- 工具链 ----------
+GCC ?= arm-none-eabi-gcc
+GXX ?= arm-none-eabi-g++
+READELF ?= arm-none-eabi-readelf
+
+# 解包工具链 (apt-get download + dpkg-deb -x) 的附加搜索路径
+TOOLCHAIN_ROOT ?=
+ifneq ($(TOOLCHAIN_ROOT),)
+GCC_VER := $(shell $(GXX) -dumpversion)
+TC_INC_CXX := $(TOOLCHAIN_ROOT)/usr/include/newlib/c++/$(GCC_VER)
+TC_INC_VAR := $(TC_INC_CXX)/arm-none-eabi/arm/v5te/softfp
+TC_INC_GCC := $(TOOLCHAIN_ROOT)/usr/lib/gcc/arm-none-eabi/$(GCC_VER)/include
+TC_INC_SYS := $(TOOLCHAIN_ROOT)/usr/include
+TC_INC_NEWLIB := $(TOOLCHAIN_ROOT)/usr/include/newlib
+TC_BIN_GCC := $(TOOLCHAIN_ROOT)/usr/lib/gcc/arm-none-eabi/$(GCC_VER)
+TC_LIB_NEWLIB := $(TOOLCHAIN_ROOT)/usr/lib/arm-none-eabi/newlib
+EXTRA_CPPFLAGS := -I"$(TC_INC_VAR)" -I"$(TC_INC_CXX)/arm-none-eabi" -I"$(TC_INC_CXX)" \
+	-I"$(TC_INC_SYS)" -I"$(TC_INC_NEWLIB)" -I"$(TC_INC_GCC)"
+EXTRA_LDFLAGS := -B"$(TC_BIN_GCC)" -L"$(TC_LIB_NEWLIB)"
+endif
+
+G1SDK := ../HP/g1sdk
+BUILD := build/upsilon
+TARGET := $(BUILD)/primemarkdown.elf
+TARGET_PROBE := $(BUILD)/probe.elf
+
+# ---------- 编译单元 ----------
+PORT_SOURCES_UP := \
+	port/prime_log.cpp \
+	port/prime_svc.cpp \
+	port/prime_platform.cpp \
+	port/prime_render_api.cpp \
+	port/prime_layout.cpp \
+	port/prime_upsilon_stubs.cpp
+
+PORT_SOURCES := $(PORT_SOURCES_UP) port/prime_upsilon_main.cpp
+
+NMD_SOURCES := \
+	src/text/font.cpp \
+	src/text/font_pack.cpp \
+	src/text/glyph_cache.cpp \
+	src/text/compositor.cpp \
+	src/text/text_renderer.cpp \
+	src/text/text_system.cpp \
+	src/text/harfbuzz_shaper.cpp \
+	src/math/math_atoms.cpp \
+	src/math/math_lexer.cpp \
+	src/math/math_layout.cpp \
+	src/math/math_macros.cpp \
+	src/math/math_parser.cpp \
+	src/math/math_system.cpp \
+	src/render/surface565.cpp \
+	src/render/primitives.cpp \
+	src/document/utf8.cpp \
+	src/document/unicode.cpp \
+	src/generated/core_font_pack.cpp \
+	src/generated/core_math_font.cpp \
+	src/generated/unicode_tables.cpp \
+	src/generated/html_entities.cpp \
+	src/document/document_ir.cpp \
+	src/document/entity.cpp \
+	src/document/markdown.cpp \
+	src/layout/fenwick.cpp \
+	src/layout/block_layout.cpp
+
+FREETYPE_SOURCES := \
+	third_party/freetype/src/base/ftsystem.c \
+	third_party/freetype/src/base/ftdebug.c \
+	third_party/freetype/src/base/ftinit.c \
+	third_party/freetype/src/base/ftbase.c \
+	third_party/freetype/src/base/ftbitmap.c \
+	third_party/freetype/src/base/ftmm.c \
+	third_party/freetype/src/sfnt/sfnt.c \
+	third_party/freetype/src/truetype/truetype.c \
+	third_party/freetype/src/cff/cff.c \
+	third_party/freetype/src/psaux/psaux.c \
+	third_party/freetype/src/pshinter/pshinter.c \
+	third_party/freetype/src/psnames/psnames.c \
+	third_party/freetype/src/smooth/smooth.c \
+	third_party/freetype/src/autofit/autofit.c
+
+HARFBUZZ_SOURCES := third_party/harfbuzz/src/harfbuzz.cc
+# md4c: 7260 行大文件, 单独降优化级加速编译 (功能不受影响)
+MD4C_SOURCES := third_party/md4c/md4c.c
+BESTA_SOURCES := $(G1SDK)/src/besta_fixes.cc
+
+CPP_SOURCES = $(PORT_SOURCES) $(NMD_SOURCES) $(HARFBUZZ_SOURCES) $(BESTA_SOURCES)
+C_SOURCES   = $(FREETYPE_SOURCES) $(MD4C_SOURCES)
+
+CPP_OBJECTS := $(addprefix $(BUILD)/, \
+	$(patsubst %.cc,%.o,$(patsubst %.cpp,%.o,$(CPP_SOURCES))))
+C_OBJECTS   := $(addprefix $(BUILD)/, $(C_SOURCES:%.c=%.o))
+OBJECTS     := $(CPP_OBJECTS) $(C_OBJECTS)
+
+# md4c 单独规则: -O1 (大文件提速)
+$(BUILD)/third_party/md4c/md4c.o: third_party/md4c/md4c.c
+	@mkdir -p $(dir $@)
+	$(GCC) $(CPPFLAGS) $(subst -O3,-O1,$(CFLAGS)) -c $< -o $@
+
+# ---------- 编译/链接选项 ----------
+INCLUDES := -Iinclude -Iport \
+	-Ithird_party/freetype/nmarkdown -Ithird_party/freetype/include \
+	-Ithird_party/harfbuzz/src -Ithird_party/md4c -I$(G1SDK)/include
+
+CPPFLAGS := $(INCLUDES) -DHPG1 -DMUTEKI_HAS_PRIME_UI_EVENT \
+	-DHB_TINY=1 -DNMARKDOWN_HARFBUZZ_MATH=1 \
+	-DNMARKDOWN_PRIME=1 -DPRIMETEX_UPSILON=1 -DPRIMETEX_EVENT_DIAG=1 \
+	$(EXTRA_CPPFLAGS)
+CFLAGS   := -std=gnu99 -Os -Wall -Wextra -DFT2_BUILD_LIBRARY \
+	-ffunction-sections -fdata-sections -MMD -MP \
+	-marm -mcpu=arm926ej-s -mfloat-abi=soft
+CXXFLAGS := -std=c++17 -Os -Wall -Wextra -Wpedantic -fexceptions -fno-rtti \
+	-fno-builtin -fpermissive \
+	-ffunction-sections -fdata-sections -MMD -MP \
+	-marm -mcpu=arm926ej-s -mfloat-abi=soft
+
+# g1app.ld + AppMain 入口 + newlib (绕过 nano.specs: Ubuntu 无 newlib-nano 包)
+LDFLAGS := -T $(G1SDK)/lib/g1app.ld -Wl,--entry=AppMain -nostartfiles \
+	-Wl,--gc-sections -Wl,-n \
+	-Wl,--no-wchar-size-warning -Wl,--no-enum-size-warning \
+	-Wl,--allow-multiple-definition \
+	-Wl,-Map=$(BUILD)/primemarkdown.map $(EXTRA_LDFLAGS)
+LDLIBS := -L$(G1SDK)/lib/ -lsyscalls -lc -lstdc++ -lsupc++ -lgcc
+
+.PHONY: all probe probe2 probe3 probe4 probe5 probe6 probe7 probe8 probe10 probe13 check clean FORCE
+
+all: $(TARGET)
+
+# 探针: 纯 Printf 二分定位崩溃 (不加载渲染核心)
+# 用不含 libstdc++ 的链接 (排除 libstdc++ 静态初始化嫌疑)
+PROBE_SOURCES := port/prime_upsilon_probe.cpp port/prime_upsilon_stubs.cpp
+PROBE_OBJECTS := $(addprefix $(BUILD)/, \
+	$(patsubst %.cc,%.o,$(patsubst %.cpp,%.o,$(PROBE_SOURCES))))
+LDLIBS_PROBE := -L$(G1SDK)/lib/ -lsyscalls -lc -lgcc
+
+probe: $(TARGET_PROBE)
+
+$(TARGET_PROBE): $(PROBE_OBJECTS) $(G1SDK)/src/besta_fixes.cc
+	@mkdir -p $(dir $@)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) -c $(G1SDK)/src/besta_fixes.cc -o $(BUILD)/besta_fixes_probe.o
+	$(GXX) $(LDFLAGS) $(PROBE_OBJECTS) $(BUILD)/besta_fixes_probe.o \
+		$(LDLIBS_PROBE) -o $@
+	@echo "--- probe 摘要 ---"
+	$(READELF) -h $@ | grep -E "Type|Entry"
+	$(READELF) -s $@ | grep " AppMain" | head -2
+
+# probe3: 异常机制 + heap + formula 探针
+TARGET_PROBE3 := $(BUILD)/probe3.elf
+PROBE3_MAIN := port/prime_upsilon_probe3.cpp
+PROBE3_SOURCES := $(PORT_SOURCES_UP) $(PROBE3_MAIN) \
+	$(NMD_SOURCES) $(HARFBUZZ_SOURCES)
+PROBE3_OBJECTS := $(addprefix $(BUILD)/, \
+	$(patsubst %.cc,%.o,$(patsubst %.cpp,%.o,$(PROBE3_SOURCES)))) \
+	$(addprefix $(BUILD)/, $(FREETYPE_SOURCES:%.c=%.o))
+
+probe3: $(TARGET_PROBE3)
+
+$(TARGET_PROBE3): $(PROBE3_OBJECTS) $(G1SDK)/src/besta_fixes.cc
+	@mkdir -p $(dir $@)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) -c $(G1SDK)/src/besta_fixes.cc -o $(BUILD)/besta_fixes_probe3.o
+	$(GXX) $(LDFLAGS) $(PROBE3_OBJECTS) $(BUILD)/besta_fixes_probe3.o \
+		$(LDLIBS) -o $@
+	@echo "--- probe3 摘要 ---"
+	$(READELF) -h $@ | grep -E "Type|Entry"
+	$(READELF) -s $@ | grep " AppMain" | head -2
+
+# probe4: 全屏色块探针 (红→绿→蓝→白, 报最后颜色即可定位)
+TARGET_PROBE4 := $(BUILD)/probe4.elf
+PROBE4_MAIN := port/prime_upsilon_probe4.cpp
+PROBE4_SOURCES := $(PORT_SOURCES_UP) $(PROBE4_MAIN) \
+	$(NMD_SOURCES) $(HARFBUZZ_SOURCES)
+PROBE4_OBJECTS := $(addprefix $(BUILD)/, \
+	$(patsubst %.cc,%.o,$(patsubst %.cpp,%.o,$(PROBE4_SOURCES)))) \
+	$(addprefix $(BUILD)/, $(FREETYPE_SOURCES:%.c=%.o))
+
+probe4: $(TARGET_PROBE4)
+
+$(TARGET_PROBE4): $(PROBE4_OBJECTS) $(G1SDK)/src/besta_fixes.cc
+	@mkdir -p $(dir $@)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) -c $(G1SDK)/src/besta_fixes.cc -o $(BUILD)/besta_fixes_probe4.o
+	$(GXX) $(LDFLAGS) $(PROBE4_OBJECTS) $(BUILD)/besta_fixes_probe4.o \
+		$(LDLIBS) -o $@
+	@echo "--- probe4 摘要 ---"
+	$(READELF) -h $@ | grep -E "Type|Entry"
+	$(READELF) -s $@ | grep " AppMain" | head -2
+
+# probe5: 主版特有调用逐项色块探针
+TARGET_PROBE5 := $(BUILD)/probe5.elf
+PROBE5_MAIN := port/prime_upsilon_probe5.cpp
+PROBE5_SOURCES := $(PORT_SOURCES_UP) $(PROBE5_MAIN) \
+	$(NMD_SOURCES) $(HARFBUZZ_SOURCES)
+PROBE5_OBJECTS := $(addprefix $(BUILD)/, \
+	$(patsubst %.cc,%.o,$(patsubst %.cpp,%.o,$(PROBE5_SOURCES)))) \
+	$(addprefix $(BUILD)/, $(FREETYPE_SOURCES:%.c=%.o))
+
+probe5: $(TARGET_PROBE5)
+
+$(TARGET_PROBE5): $(PROBE5_OBJECTS) $(G1SDK)/src/besta_fixes.cc
+	@mkdir -p $(dir $@)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) -c $(G1SDK)/src/besta_fixes.cc -o $(BUILD)/besta_fixes_probe5.o
+	$(GXX) $(LDFLAGS) $(PROBE5_OBJECTS) $(BUILD)/besta_fixes_probe5.o \
+		$(LDLIBS) -o $@
+	@echo "--- probe5 摘要 ---"
+	$(READELF) -h $@ | grep -E "Type|Entry"
+	$(READELF) -s $@ | grep " AppMain" | head -2
+
+# probe6: 事件 SVC 主线程直测
+TARGET_PROBE6 := $(BUILD)/probe6.elf
+PROBE6_MAIN := port/prime_upsilon_probe6.cpp
+PROBE6_SOURCES := $(PORT_SOURCES_UP) $(PROBE6_MAIN) \
+	$(NMD_SOURCES) $(HARFBUZZ_SOURCES)
+PROBE6_OBJECTS := $(addprefix $(BUILD)/, \
+	$(patsubst %.cc,%.o,$(patsubst %.cpp,%.o,$(PROBE6_SOURCES)))) \
+	$(addprefix $(BUILD)/, $(FREETYPE_SOURCES:%.c=%.o))
+
+probe6: $(TARGET_PROBE6)
+
+$(TARGET_PROBE6): $(PROBE6_OBJECTS) $(G1SDK)/src/besta_fixes.cc
+	@mkdir -p $(dir $@)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) -c $(G1SDK)/src/besta_fixes.cc -o $(BUILD)/besta_fixes_probe6.o
+	$(GXX) $(LDFLAGS) $(PROBE6_OBJECTS) $(BUILD)/besta_fixes_probe6.o \
+		$(LDLIBS) -o $@
+	@echo "--- probe6 摘要 ---"
+	$(READELF) -h $@ | grep -E "Type|Entry"
+	$(READELF) -s $@ | grep " AppMain" | head -2
+
+# probe7: 退出前清理事件 (验证退出崩溃修复)
+TARGET_PROBE7 := $(BUILD)/probe7.elf
+PROBE7_MAIN := port/prime_upsilon_probe7.cpp
+PROBE7_SOURCES := $(PORT_SOURCES_UP) $(PROBE7_MAIN) \
+	$(NMD_SOURCES) $(HARFBUZZ_SOURCES)
+PROBE7_OBJECTS := $(addprefix $(BUILD)/, \
+	$(patsubst %.cc,%.o,$(patsubst %.cpp,%.o,$(PROBE7_SOURCES)))) \
+	$(addprefix $(BUILD)/, $(FREETYPE_SOURCES:%.c=%.o))
+
+probe7: $(TARGET_PROBE7)
+
+$(TARGET_PROBE7): $(PROBE7_OBJECTS) $(G1SDK)/src/besta_fixes.cc
+	@mkdir -p $(dir $@)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) -c $(G1SDK)/src/besta_fixes.cc -o $(BUILD)/besta_fixes_probe7.o
+	$(GXX) $(LDFLAGS) $(PROBE7_OBJECTS) $(BUILD)/besta_fixes_probe7.o \
+		$(LDLIBS) -o $@
+	@echo "--- probe7 摘要 ---"
+	$(READELF) -h $@ | grep -E "Type|Entry"
+	$(READELF) -s $@ | grep " AppMain" | head -2
+
+# probe8: 非阻塞事件 SVC 替代测试
+TARGET_PROBE8 := $(BUILD)/probe8.elf
+PROBE8_MAIN := port/prime_upsilon_probe8.cpp
+PROBE8_SOURCES := $(PORT_SOURCES_UP) $(PROBE8_MAIN) \
+	$(NMD_SOURCES) $(HARFBUZZ_SOURCES)
+PROBE8_OBJECTS := $(addprefix $(BUILD)/, \
+	$(patsubst %.cc,%.o,$(patsubst %.cpp,%.o,$(PROBE8_SOURCES)))) \
+	$(addprefix $(BUILD)/, $(FREETYPE_SOURCES:%.c=%.o))
+
+probe8: $(TARGET_PROBE8)
+
+$(TARGET_PROBE8): $(PROBE8_OBJECTS) $(G1SDK)/src/besta_fixes.cc
+	@mkdir -p $(dir $@)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) -c $(G1SDK)/src/besta_fixes.cc -o $(BUILD)/besta_fixes_probe8.o
+	$(GXX) $(LDFLAGS) $(PROBE8_OBJECTS) $(BUILD)/besta_fixes_probe8.o \
+		$(LDLIBS) -o $@
+	@echo "--- probe8 摘要 ---"
+	$(READELF) -h $@ | grep -E "Type|Entry"
+	$(READELF) -s $@ | grep " AppMain" | head -2
+
+# probe10: 无线程 + 主线程 GetEvent + OSExitThread 退出
+TARGET_PROBE10 := $(BUILD)/probe10.elf
+PROBE10_MAIN := port/prime_upsilon_probe10.cpp
+PROBE10_SOURCES := $(PORT_SOURCES_UP) $(PROBE10_MAIN) \
+	$(NMD_SOURCES) $(HARFBUZZ_SOURCES)
+PROBE10_OBJECTS := $(addprefix $(BUILD)/, \
+	$(patsubst %.cc,%.o,$(patsubst %.cpp,%.o,$(PROBE10_SOURCES)))) \
+	$(addprefix $(BUILD)/, $(FREETYPE_SOURCES:%.c=%.o))
+
+probe10: $(TARGET_PROBE10)
+
+$(TARGET_PROBE10): $(PROBE10_OBJECTS) $(G1SDK)/src/besta_fixes.cc
+	@mkdir -p $(dir $@)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) -c $(G1SDK)/src/besta_fixes.cc -o $(BUILD)/besta_fixes_probe10.o
+	$(GXX) $(LDFLAGS) $(PROBE10_OBJECTS) $(BUILD)/besta_fixes_probe10.o \
+		$(LDLIBS) -o $@
+	@echo "--- probe10 摘要 ---"
+	$(READELF) -h $@ | grep -E "Type|Entry"
+	$(READELF) -s $@ | grep " AppMain" | head -2
+
+# probe13: 主版前置 SVC + 全部公式逐项色块
+TARGET_PROBE13 := $(BUILD)/probe13.elf
+PROBE13_MAIN := port/prime_upsilon_probe13.cpp
+PROBE13_SOURCES := $(PORT_SOURCES_UP) $(PROBE13_MAIN) \
+	$(NMD_SOURCES) $(HARFBUZZ_SOURCES)
+PROBE13_OBJECTS := $(addprefix $(BUILD)/, \
+	$(patsubst %.cc,%.o,$(patsubst %.cpp,%.o,$(PROBE13_SOURCES)))) \
+	$(addprefix $(BUILD)/, $(FREETYPE_SOURCES:%.c=%.o))
+
+probe13: $(TARGET_PROBE13)
+
+$(TARGET_PROBE13): $(PROBE13_OBJECTS) $(G1SDK)/src/besta_fixes.cc
+	@mkdir -p $(dir $@)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) -c $(G1SDK)/src/besta_fixes.cc -o $(BUILD)/besta_fixes_probe13.o
+	$(GXX) $(LDFLAGS) $(PROBE13_OBJECTS) $(BUILD)/besta_fixes_probe13.o \
+		$(LDLIBS) -o $@
+	@echo "--- probe13 摘要 ---"
+	$(READELF) -h $@ | grep -E "Type|Entry"
+	$(READELF) -s $@ | grep " AppMain" | head -2
+
+TARGET_PROBE2 := $(BUILD)/probe2.elf
+PROBE2_MAIN := port/prime_upsilon_probe2.cpp
+PROBE2_SOURCES := $(PORT_SOURCES_UP) $(PROBE2_MAIN) \
+	$(NMD_SOURCES) $(HARFBUZZ_SOURCES)
+PROBE2_C_SOURCES := $(FREETYPE_SOURCES)
+PROBE2_OBJECTS := $(addprefix $(BUILD)/, \
+	$(patsubst %.cc,%.o,$(patsubst %.cpp,%.o,$(PROBE2_SOURCES)))) \
+	$(addprefix $(BUILD)/, $(PROBE2_C_SOURCES:%.c=%.o))
+
+probe2: $(TARGET_PROBE2)
+
+$(TARGET_PROBE2): $(PROBE2_OBJECTS) $(G1SDK)/src/besta_fixes.cc
+	@mkdir -p $(dir $@)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) -c $(G1SDK)/src/besta_fixes.cc -o $(BUILD)/besta_fixes_probe2.o
+	$(GXX) $(LDFLAGS) $(PROBE2_OBJECTS) $(BUILD)/besta_fixes_probe2.o \
+		$(LDLIBS) -o $@
+	@echo "--- probe2 摘要 ---"
+	$(READELF) -h $@ | grep -E "Type|Entry"
+	$(READELF) -s $@ | grep " AppMain" | head -2
+	$(READELF) -s $@ | grep " prime_render_init" | head -1
+
+FORCE:
+
+$(BUILD)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/%.o: %.cc
+	@mkdir -p $(dir $@)
+	$(GXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(GCC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(TARGET): $(OBJECTS)
+	@mkdir -p $(dir $@)
+	$(GXX) $(LDFLAGS) $(OBJECTS) $(LDLIBS) -o $@
+
+# 形态校验: Upsilon external app (EXEC + AppMain 入口 + 段布局)
+check: $(TARGET)
+	@echo "--- readelf 摘要 ---"
+	$(READELF) -h $(TARGET) | grep -E "Class|Machine|Type|Entry"
+	$(READELF) -l $(TARGET) | grep LOAD
+	@echo "--- 关键符号 ---"
+	$(READELF) -s $(TARGET) | grep -E "AppMain|main|__exidx_start" | head
+	@echo "--- 尺寸 ---"
+	$(READELF) -S $(TARGET) | grep -E "ER_RO|ER_RW|ER_ZI" 
+
+clean:
+	rm -rf $(BUILD)
+
+-include $(OBJECTS:.o=.d)
