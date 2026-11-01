@@ -135,6 +135,8 @@ extern "C" void* malloc(unsigned size);
 extern "C" volatile unsigned g_dbg_w7;
 extern "C" volatile unsigned g_dbg_w8;
 extern "C" volatile int g_dbg_n;
+extern "C" volatile unsigned g_dbg_scan;
+extern "C" volatile int g_dbg_ev;
 static int g_stack_entry;
 /* 静态大栈：不走堆分配，保证入口线程路径一定生效 */
 static unsigned char g_big_stack[96u * 1024u] __attribute__((aligned(8)));
@@ -266,6 +268,16 @@ extern "C" void* demo_main(void* arg) {
                         int d = (g_dbg_w7 >> sh) & 0xF;
                         b[n++] = (char)(d < 10 ? '0' + d : 'a' + d - 10);
                     }
+                    pfx = " sc=";
+                    while (*pfx) b[n++] = *pfx++;
+                    for (int sh = 12; sh >= 0; sh -= 4) {
+                        int d = (g_dbg_scan >> sh) & 0xF;
+                        b[n++] = (char)(d < 10 ? '0' + d : 'a' + d - 10);
+                    }
+                    pfx = " ev=";
+                    while (*pfx) b[n++] = *pfx++;
+                    b[n++] = (char)('0' + (g_dbg_ev % 100) / 10);
+                    b[n++] = (char)('0' + g_dbg_ev % 10);
                     pfx = " st=";
                     while (*pfx) b[n++] = *pfx++;
                     b[n++] = (char)('0' + g_stack_entry);
