@@ -251,50 +251,7 @@ extern "C" void* demo_main(void* arg) {
         prime_log_int(prime_render_count_ink(kBackground));
         prime_log_write("\n");
 
-        int key = 0;
-        {
-            int waited = 0;
-            while (waited < kTimeoutMs) {
-                key = prime_render_wait_key(500);
-                {
-                    char b[64];
-                    int n = 0;
-                    const char* pfx = "s2 h=";
-                    while (*pfx) b[n++] = *pfx++;
-                    n += 1; b[n-1] = (char)('0' + (g_dbg_n % 10));
-                    pfx = " w7=";
-                    while (*pfx) b[n++] = *pfx++;
-                    for (int sh = 28; sh >= 0; sh -= 4) {
-                        int d = (g_dbg_w7 >> sh) & 0xF;
-                        b[n++] = (char)(d < 10 ? '0' + d : 'a' + d - 10);
-                    }
-                    pfx = " sc=";
-                    while (*pfx) b[n++] = *pfx++;
-                    for (int sh = 12; sh >= 0; sh -= 4) {
-                        int d = (g_dbg_scan >> sh) & 0xF;
-                        b[n++] = (char)(d < 10 ? '0' + d : 'a' + d - 10);
-                    }
-                    pfx = " ev=";
-                    while (*pfx) b[n++] = *pfx++;
-                    b[n++] = (char)('0' + (g_dbg_ev % 100) / 10);
-                    b[n++] = (char)('0' + g_dbg_ev % 10);
-                    pfx = " st=";
-                    while (*pfx) b[n++] = *pfx++;
-                    b[n++] = (char)('0' + g_stack_entry);
-                    b[n] = 0;
-                    prime_render_text(b, 4, 226, 10, kInk, kBackground, 0);
-                    prime_render_present();
-                }
-                if (key != 0) break;
-                waited += 500;
-                if (key == 0 && waited >= kTimeoutMs) break;
-            }
-        }
-#ifdef PRIMETEX_EVENT_DIAG
-        prime_log_write("[ev] 等待结果 key=");
-        prime_log_int(key);
-        prime_log_write("\n");
-#endif
+        const int key = prime_render_wait_key(kTimeoutMs);
         if (key < 0) {  // 事件线程创建失败等异常
             prime_log_write("事件系统异常: ");
             prime_log_int(key);
