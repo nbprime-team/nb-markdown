@@ -267,7 +267,6 @@ extern "C" void* demo_main(void* arg) {
     }
 
     clear_screen_on_exit();
-    input_restore();
     prime_log_write("PrimeTeX 演示结束\n");
     g_demo_done = 1;
     return prime_log_struct();

@@ -404,10 +404,19 @@ extern "C" void prime_input_hook(void* evp) {
 }
 
 extern "C" int prime_poll_key_event(void) {
-    const int v = g_pending;
-    if (v != 0) {
-        g_pending = 0;
-        return v;
+    /* 路线 A：非阻塞 GetPendEvent（0x10040），事件结构与 GetEvent 相同 */
+    std::uint32_t buf[18];
+    if (!prime_get_pend_event(buf)) {
+        return -2;
+    }
+    const std::uint32_t type = buf[7];
+    if (type == 0x10U) {
+        const InputEvent e = map_scan_code(buf[8] >> 16U);
+        return e.type == InputEventType::None ? -2 : static_cast<int>(e.type);
+    }
+    if (type == 0x1U || type == 0x8U) {
+        /* 触摸: 按下/抬起都当作"点按=下一页" */
+        return static_cast<int>(InputEventType::Activate);
     }
     return -2;
 }
