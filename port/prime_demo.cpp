@@ -264,7 +264,7 @@ extern "C" void* demo_main(void* arg) {
                 {
                     char b[64];
                     int n = 0;
-                    const char* pfx = "h=";
+                    const char* pfx = "s2 h=";
                     while (*pfx) b[n++] = *pfx++;
                     n += 1; b[n-1] = (char)('0' + (g_dbg_n % 10));
                     pfx = " w7=";
