@@ -81,6 +81,21 @@ def load_sections(f):
     }
 
 
+def check_no_vfp(path):
+    import subprocess
+    out = subprocess.run(["arm-none-eabi-objdump", "-d", path],
+                         capture_output=True, text=True).stdout
+    bad = [l for l in out.splitlines()
+           if any(op in l for op in ("vldr", "vstr", "vmov", "vadd", "vsub",
+                                     "vmul", "vdiv", "vcvt", "vpush", "vpop"))]
+    if bad:
+        print("ERROR: 目标 ELF 含 VFP 指令（ARM926 无 FPU，必复位）")
+        for l in bad[:5]:
+            print("  ", l.strip())
+        return False
+    return True
+
+
 def main():
     global path
     args = [a for a in sys.argv[1:] if not a.startswith("--")]

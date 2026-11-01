@@ -124,21 +124,21 @@ ifeq ($(PRIMETEX_DIAG),1)
 CPPFLAGS += -DPRIMETEX_EVENT_DIAG=1
 endif
 CFLAGS   := -std=c99 -Os -Wall -Wextra -DFT2_BUILD_LIBRARY -fPIC \
-	-ffunction-sections -fdata-sections -MMD -MP $(ISA) -mcpu=$(ARCH)
+	-ffunction-sections -fdata-sections -MMD -MP $(ISA) -mcpu=$(ARCH) -mgeneral-regs-only
 CXXFLAGS := -std=c++17 -Os -Wall -Wextra -Wpedantic -fPIC -fexceptions \
 	-fno-rtti -fno-builtin \
-	-ffunction-sections -fdata-sections -MMD -MP $(ISA) -mcpu=$(ARCH)
+	-ffunction-sections -fdata-sections -MMD -MP $(ISA) -mcpu=$(ARCH) -mgeneral-regs-only
 
 # ET_DYN + 入口 app_entry + 无未定义符号 + gc 裁剪
 # -Bsymbolic/--exclude-libs: 静态库(non-PIC 的 libstdc++/libgcc)的符号绑定
 # 到本地, 消除 R_ARM_JUMP_SLOT/GLOB_DAT 符号重定位 —— shellcode 加载器只
 # 处理 R_ARM_RELATIVE (+base), 不能做动态符号解析。
-LDFLAGS := -shared -Wl,-e,app_entry -Wl,--no-undefined \
+LDFLAGS := $(ISA) -mcpu=$(ARCH) -mfloat-abi=soft -shared -Wl,-e,app_entry -Wl,--no-undefined \
 	-Wl,--gc-sections -Wl,--no-dynamic-linker -Wl,--build-id=none \
 	-Wl,-Bsymbolic -Wl,--exclude-libs,ALL \
 	-Wl,-Map=$(BUILD_DIR)/primetex.map $(EXTRA_LDFLAGS)
 
-LIBS := -lstdc++ -lsupc++ -lgcc
+LIBS := $(TC_LIB_NEWLIB)/libstdc++.a $(TC_LIB_NEWLIB)/libsupc++.a -lgcc
 
 .PHONY: all check check-relocs clean FORCE
 
