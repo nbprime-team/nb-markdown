@@ -349,33 +349,61 @@ static volatile int g_pending;      /* 解码后的事件类型，0 = 无 */
 static volatile int g_touch_down;
 static volatile int g_tx0, g_ty0;
 
-/* 补丁写入器：nbCode 的 nb_slot_patch，CP15 顺序不能改（见 PRIME-NOTES） */
-extern "C" __attribute__((naked)) void prime_slot_patch(void* dst,
-                                                        const void* src,
-                                                        int n) {
+/* SDK prime_input.S 的 prime_privileged_memcpy：字节拷贝 + CP15 维护 */
+extern "C" __attribute__((naked)) void prime_priv_memcpy(void* dst,
+                                                         const void* src,
+                                                         unsigned n) {
     (void)dst; (void)src; (void)n;
     __asm__ volatile(
-        "mov r3, #0\n"
-        "mrs r4, cpsr\n"
-        "orr r5, r4, #0x80\n"
+        "push {r4, r5, r6, lr}\n"
+        "mrs r4, apsr\n"
+        "orr r5, r4, #128\n"
         "msr cpsr_c, r5\n"
         "mrc p15, 0, r6, c3, c0, 0\n"
         "mvn r5, #0\n"
         "mcr p15, 0, r5, c3, c0, 0\n"
         "1:\n"
-        "ldr r5, [r1], #4\n"
-        "str r5, [r0], #4\n"
+        "cmp r2, #0\n"
+        "beq 2f\n"
+        "ldrb r3, [r1], #1\n"
+        "strb r3, [r0], #1\n"
         "subs r2, r2, #1\n"
         "bne 1b\n"
+        "2:\n"
+        "mov r3, #0\n"
         "mcr p15, 0, r3, c7, c10, 1\n"
         "mcr p15, 0, r3, c7, c5, 0\n"
         "mcr p15, 0, r3, c7, c10, 4\n"
         "mcr p15, 0, r6, c3, c0, 0\n"
         "msr cpsr_c, r4\n"
-        "bx lr\n");
+        "pop {r4, r5, r6, pc}\n");
 }
 
-/* 固件输入线程调用：先让固件填事件，再解码 */
+#define PRIME_HOOK_TARGET 0x307FBFA0u
+static unsigned char g_saved_code[16] __attribute__((aligned(4)));
+static unsigned g_tramp[2] __attribute__((aligned(4)));
+static int g_hook_installed;
+
+extern "C" int prime_hook_install(void* cb) {
+    if (g_hook_installed || !cb) {
+        return 0;
+    }
+    prime_priv_memcpy(g_saved_code, (const void*)PRIME_HOOK_TARGET, 16u);
+    g_tramp[0] = 0xE51FF004u;
+    g_tramp[1] = (unsigned)(unsigned long)cb;
+    prime_priv_memcpy((void*)PRIME_HOOK_TARGET, g_tramp, 8u);
+    g_hook_installed = 1;
+    return 1;
+}
+
+extern "C" void prime_hook_remove(void) {
+    if (!g_hook_installed) {
+        return;
+    }
+    prime_priv_memcpy((void*)PRIME_HOOK_TARGET, g_saved_code, 16u);
+    g_hook_installed = 0;
+}
+
 extern "C" void prime_input_hook(void* evp) {
     /* 判据照 keymon（真机实测）：不看 +4 的 type。
      *   w7 = *(u32*)(ev+28):  16 按下 / 0x100000 抬起；触摸 1/2/8
