@@ -136,6 +136,8 @@ extern "C" volatile unsigned g_dbg_w7;
 extern "C" volatile unsigned g_dbg_w8;
 extern "C" volatile int g_dbg_n;
 static int g_stack_entry;
+/* 静态大栈：不走堆分配，保证入口线程路径一定生效 */
+static unsigned char g_big_stack[96u * 1024u] __attribute__((aligned(8)));
 
 /* 入口线程内切到自备栈：事件在入口线程分发，栈又不能太小。 */
 extern "C" __attribute__((naked)) void* run_on_stack(void* sp, void* arg) {
