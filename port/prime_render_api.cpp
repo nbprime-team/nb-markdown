@@ -6,6 +6,9 @@
  */
 #include "prime_render_api.h"
 
+#include <cstdint>
+#include "prime_svc.h"
+
 #include <string>
 #include <string_view>
 
@@ -274,29 +277,23 @@ int prime_render_count_ink(uint16_t background) {
     });
 }
 
+extern "C" int prime_poll_key_event(void);  /* port/prime_platform.cpp */
+
 int prime_render_wait_key(int timeout_ms) {
     return safe_call([&]() -> int {
         RenderRuntime& rt = runtime();
         if (!rt.ready) return -4;
-        const int thr_rc = prime_event_thread_start();  // 幂等
-        if (thr_rc != 0) return -7;  // 事件线程创建失败
-        InputPrime input(prime_get_services());
-        ClockPrime clock(prime_get_services());
-        input.drain();  // 清共享标志
-        // 超时用「轮询次数 × 30ms」计数, 不依赖 GetSysTime (注入上下文不可靠)
+        /* 主线程直接轮询固件 GetEvent：不创建事件线程。
+         * 线程版曾在真机上"画面正常但收不到事件"（见 MIGRATION-NOTES.md）。 */
         const int timeout_polls =
-            timeout_ms > 0 ? (timeout_ms + 29) / 30 : 0;  // 每轮 30ms
+            timeout_ms > 0 ? (timeout_ms + 29) / 30 : 0;
         int polls = 0;
         for (;;) {
-            InputEvent ev;
-            if (input.poll(ev)) {
-                if (ev.type != InputEventType::None) {
-                    return static_cast<int>(ev.type);
-                }
-            }
-            clock.sleep_ms(30);
+            const int ev = prime_poll_key_event();
+            if (ev >= 0) return ev;
+            prime_os_sleep(30);
             if (timeout_ms > 0 && ++polls >= timeout_polls) {
-                return 0;  // 超时
+                return 0;
             }
         }
     });

@@ -121,14 +121,9 @@ extern "C" void* app_entry(PrimeBootConfig* cfg) {
     prime_set_services(reinterpret_cast<const PrimeServices*>(
         static_cast<std::uintptr_t>(cfg->services)));
 
-    /* 事件线程: call 上下文直接创建 (栈=0, 线程内 ClearAllEvents + 阻塞
-     * GetEvent)。此前由 OSCreateThread 线程嵌套创建 + 32B 缓冲是失效根因。 */
-    const int thr_rc = prime_render_event_thread_start();
-    if (thr_rc != 0) {
-        prime_log_write("事件线程创建失败: ");
-        prime_log_int(thr_rc);
-        prime_log_write("\n");
-    }
+    /* 输入走主线程 GetEvent（prime_render_wait_key 内部轮询），
+     * 不再创建事件线程——线程版在真机上画面正常但收不到按键。 */
+    prime_clear_all_events();
 
     /* doom/eventg1 同款前置: 关系统电源管理 + 清屏 */
     prime_set_system_variable(85u /* SYSVAR_SYSPWCTRL */, 2u /* SET */,
@@ -215,7 +210,7 @@ extern "C" void* app_entry(PrimeBootConfig* cfg) {
     }
 
     clear_screen_on_exit();
-    prime_render_event_thread_stop();  // 终止事件线程 (幂等)
+    prime_clear_all_events();
     prime_log_write("PrimeTeX 演示结束\n");
     return prime_log_struct();
 }

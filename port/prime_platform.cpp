@@ -344,6 +344,38 @@ int event_thread_fn(void*) {
 
 }  // namespace
 
+/* 主线程非阻塞取一个事件（路线 A 使用；Upsilon 路线不需要）。
+ * 返回事件类型；-2 = 无事件；触摸按下/抬起之间的滑动在这里合成。 */
+extern "C" int prime_poll_key_event(void) {
+    static bool t_down = false;
+    static int t_x0 = 0, t_y0 = 0;
+    std::uint32_t buf[18];
+    if (!prime_get_event(buf)) {
+        return -2;
+    }
+    const std::uint32_t type = buf[7];
+    if (type == 0x10U) {
+        return static_cast<int>(map_scan_code(buf[8] >> 16U).type);
+    }
+    if (type == 0x1U) {
+        t_down = true;
+        t_x0 = static_cast<int>(buf[8] >> 16U);
+        t_y0 = static_cast<int>(buf[9]);
+        return -2;
+    }
+    if (type == 0x8U && t_down) {
+        const int dx = static_cast<int>(buf[8] >> 16U) - t_x0;
+        const int dy = static_cast<int>(buf[9]) - t_y0;
+        t_down = false;
+        if (dx < -30) return static_cast<int>(InputEventType::ScrollLineDown);
+        if (dx > 30)  return static_cast<int>(InputEventType::ScrollLineUp);
+        if (dy > 30)  return static_cast<int>(InputEventType::ScrollLineDown);
+        if (dy < -30) return static_cast<int>(InputEventType::ScrollLineUp);
+        return static_cast<int>(InputEventType::Activate);
+    }
+    return -2;
+}
+
 int prime_event_thread_start(void) {
     if (g_ev_thread != nullptr) {
         return 0;  // 已启动 (幂等)

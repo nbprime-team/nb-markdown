@@ -1,3 +1,4 @@
+#include <cstddef>
 /*
  * prime_runtime.cpp — HP Prime 移植的运行时支撑
  * =============================================

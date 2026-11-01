@@ -34,11 +34,11 @@
 主线程 `GetEvent` 阻塞循环、`ClearAllEvents` 前置、事件缓冲 64 B，
 按键 `type==0x10` 取 `buf[8]>>16`，触摸 `type==0x15` 走触控项解码。
 
-## 修复方向（下一步，需真机验证）
+## 已实施（本地构建通过，待真机验证）
 
-1. 把 `prime_demo.cpp` 的输入改为**主线程 `GetEvent` 循环**，复用
-   `prime_upsilon_main.cpp` 的骨架（保留 `prime_svc.h`，不引入 Upsilon SDK）；
-2. 触摸解码补充 `type==0x15`（当前 demo 只处理按键）；
+1. ✅ `prime_render_wait_key()` 改为**主线程直接轮询 `prime_get_event()`**
+   （`port/prime_platform.cpp` 的 `prime_poll_key_event`），不再创建事件线程；
+2. ✅ 触摸解码按 eventg1 的 `0x1/0x8`（按下/抬起）合成滑动与点按；
 3. 保留 `prime_render_wait_key()` 的 API，内部改成“取一个已解码事件”，
    避免改动渲染/翻页逻辑；
 4. 用 `examples/*.md` 做回归：ENTER/DOWN/触屏翻页、UP 回翻、ESC 返回。
