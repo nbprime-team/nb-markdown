@@ -47,3 +47,14 @@
 
 渲染/排版有疑问时对照 `../nMarkdown-0.2.0/nMarkdown-0.2.0`（原始 TI-Nspire 源码），
 本仓库只改平台层与移植胶水，不改渲染语义。
+
+## 路线 A 输入最终结论（已真机验证）
+
+1. **VFP 会让整机复位**：链接时 g++ 会选 `newlib/arm/v5te/softfp/libstdc++.a`（带 VFP），
+   ARM926 无 FPU。必须显式链接 `newlib/libstdc++.a`，并用 `check_elf.py` 的 VFP 门禁。
+2. **主循环必须在入口线程**：事件在该线程分发；新建线程会收不到。
+3. **栈必须自备**：调用上下文栈太小，`prime_render_init()` 会溢出复位；
+   用 **静态 96 KB 数组**切 SP（`malloc`/`lmalloc` 在真机上会失败）。
+4. **钩子用 SDK 原码**：`prime_privileged_memcpy` + 保存/写 16 字节槽 `0x307FBFA0`。
+5. **事件判据照 keymon**：`w7@+28==16` 为按下，`scan=w8>>16`；
+   实测键值：ENTER=11、DOWN=2、UP=1、ESC=12、ON=13。
