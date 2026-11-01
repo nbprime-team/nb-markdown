@@ -115,7 +115,23 @@ extern "C" int prime_render_demo_page(void) {
  * eventg1 main() 同款: 在 call 上下文直接 OSCreateThread 事件线程,
  * SetSystemVariable(85,2,1), 然后主线程轮询共享事件状态并做自己的工作。 */
 extern "C" void* demo_main(void* arg);
+extern "C" void prime_slot_patch(void*, const void*, int);
+extern "C" void prime_input_hook(void*);
 static volatile int g_demo_done;
+static unsigned* const kSlot = (unsigned*)0x307FBFA0u;
+static unsigned g_slot_save[2];
+
+static void input_install(void) {
+    g_slot_save[0] = kSlot[0];
+    g_slot_save[1] = kSlot[1];
+    unsigned p[2] = {0xE51FF004u, (unsigned)(void*)&prime_input_hook};
+    prime_slot_patch(kSlot, p, 2);
+}
+static void input_restore(void) {
+    if (g_slot_save[0] || g_slot_save[1]) {
+        prime_slot_patch(kSlot, g_slot_save, 2);
+    }
+}
 
 /* 入口只做"校验 + 起线程"：调试调用上下文的栈很小，初始化 FreeType/HarfBuzz
  * 会在入口直接溢出复位。主循环放到带显式栈大小的线程里（eventg1/doom 同款）。 */
@@ -251,6 +267,7 @@ extern "C" void* demo_main(void* arg) {
     }
 
     clear_screen_on_exit();
+    input_restore();
     prime_log_write("PrimeTeX 演示结束\n");
     g_demo_done = 1;
     return prime_log_struct();

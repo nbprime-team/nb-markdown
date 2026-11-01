@@ -345,32 +345,69 @@ int event_thread_fn(void*) {
 
 /* 主线程非阻塞取一个事件（路线 A 使用；Upsilon 路线不需要）。
  * 返回事件类型；-2 = 无事件；触摸按下/抬起之间的滑动在这里合成。 */
-extern "C" int prime_poll_key_event(void) {
-    static bool t_down = false;
-    static int t_x0 = 0, t_y0 = 0;
-    std::uint32_t buf[18];
-    if (!prime_get_event(buf)) {
-        return -2;
+static volatile int g_pending;      /* 解码后的事件类型，0 = 无 */
+static volatile int g_touch_down;
+static volatile int g_tx0, g_ty0;
+
+/* 补丁写入器：nbCode 的 nb_slot_patch，CP15 顺序不能改（见 PRIME-NOTES） */
+extern "C" __attribute__((naked)) void prime_slot_patch(void* dst,
+                                                        const void* src,
+                                                        int n) {
+    (void)dst; (void)src; (void)n;
+    __asm__ volatile(
+        "mov r3, #0\n"
+        "mrs r4, cpsr\n"
+        "orr r5, r4, #0x80\n"
+        "msr cpsr_c, r5\n"
+        "mrc p15, 0, r6, c3, c0, 0\n"
+        "mvn r5, #0\n"
+        "mcr p15, 0, r5, c3, c0, 0\n"
+        "1:\n"
+        "ldr r5, [r1], #4\n"
+        "str r5, [r0], #4\n"
+        "subs r2, r2, #1\n"
+        "bne 1b\n"
+        "mcr p15, 0, r3, c7, c10, 1\n"
+        "mcr p15, 0, r3, c7, c5, 0\n"
+        "mcr p15, 0, r3, c7, c10, 4\n"
+        "mcr p15, 0, r6, c3, c0, 0\n"
+        "msr cpsr_c, r4\n"
+        "bx lr\n");
+}
+
+/* 固件输入线程调用：先让固件填事件，再解码 */
+extern "C" void prime_input_hook(void* evp) {
+    unsigned* b = reinterpret_cast<unsigned*>(evp);
+    if (!prime_get_event(evp)) {
+        return;
     }
-    const std::uint32_t type = buf[7];
+    const unsigned type = b[7];
     if (type == 0x10U) {
-        return static_cast<int>(map_scan_code(buf[8] >> 16U).type);
+        const InputEvent e = map_scan_code(b[8] >> 16U);
+        if (e.type != InputEventType::None) {
+            g_pending = static_cast<int>(e.type);
+        }
+    } else if (type == 0x1U) {
+        g_touch_down = 1;
+        g_tx0 = static_cast<int>(b[8] >> 16U);
+        g_ty0 = static_cast<int>(b[9]);
+    } else if (type == 0x8U && g_touch_down) {
+        const int dx = static_cast<int>(b[8] >> 16U) - g_tx0;
+        const int dy = static_cast<int>(b[9]) - g_ty0;
+        g_touch_down = 0;
+        if (dx < -30)      g_pending = static_cast<int>(InputEventType::ScrollLineDown);
+        else if (dx > 30)  g_pending = static_cast<int>(InputEventType::ScrollLineUp);
+        else if (dy > 30)  g_pending = static_cast<int>(InputEventType::ScrollLineDown);
+        else if (dy < -30) g_pending = static_cast<int>(InputEventType::ScrollLineUp);
+        else               g_pending = static_cast<int>(InputEventType::Activate);
     }
-    if (type == 0x1U) {
-        t_down = true;
-        t_x0 = static_cast<int>(buf[8] >> 16U);
-        t_y0 = static_cast<int>(buf[9]);
-        return -2;
-    }
-    if (type == 0x8U && t_down) {
-        const int dx = static_cast<int>(buf[8] >> 16U) - t_x0;
-        const int dy = static_cast<int>(buf[9]) - t_y0;
-        t_down = false;
-        if (dx < -30) return static_cast<int>(InputEventType::ScrollLineDown);
-        if (dx > 30)  return static_cast<int>(InputEventType::ScrollLineUp);
-        if (dy > 30)  return static_cast<int>(InputEventType::ScrollLineDown);
-        if (dy < -30) return static_cast<int>(InputEventType::ScrollLineUp);
-        return static_cast<int>(InputEventType::Activate);
+}
+
+extern "C" int prime_poll_key_event(void) {
+    const int v = g_pending;
+    if (v != 0) {
+        g_pending = 0;
+        return v;
     }
     return -2;
 }
