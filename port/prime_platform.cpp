@@ -348,15 +348,8 @@ int event_thread_fn(void*) {
 extern "C" volatile unsigned g_dbg_w7;
 extern "C" volatile unsigned g_dbg_w8;
 extern "C" volatile int g_dbg_n;
-volatile unsigned g_dbg_scan;
-volatile int g_dbg_ev;
 extern "C" volatile unsigned g_dbg_scan;
 extern "C" volatile int g_dbg_ev;
-volatile unsigned g_dbg_w7;
-volatile unsigned g_dbg_w8;
-volatile int g_dbg_n;
-volatile unsigned g_dbg_scan;
-volatile int g_dbg_ev;
 static volatile int g_pending;      /* 解码后的事件类型，0 = 无 */
 static volatile int g_touch_down;
 static volatile int g_tx0, g_ty0;
