@@ -282,7 +282,6 @@ extern "C" void* demo_main(void* arg) {
     /* 退出前把固件状态还回去：清事件、恢复电源管理、摘钩子 */
     prime_hook_remove();
     prime_clear_all_events();
-    prime_set_system_variable(85u, 2u, 0u);
     clear_screen_on_exit();
     prime_log_write("PrimeTeX 演示结束\n");
     g_demo_done = 1;
