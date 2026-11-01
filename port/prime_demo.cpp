@@ -240,8 +240,6 @@ extern "C" void* demo_main(void* arg) {
             prime_log_write("演示渲染失败\n");
             break;
         }
-        prime_render_text(page == 0 ? "P1" : "P2", 292, 6, 12,
-                          kAccent, kBackground, 0);
         if (prime_render_present() != 0) {
             prime_log_write("送显失败\n");
             break;
