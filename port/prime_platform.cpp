@@ -377,32 +377,24 @@ extern "C" __attribute__((naked)) void prime_slot_patch(void* dst,
 
 /* 固件输入线程调用：先让固件填事件，再解码 */
 extern "C" void prime_input_hook(void* evp) {
-    /* 路线 A(primetcc/DOOM/nbCode) 的事件布局，和 Upsilon 的 ui_event 不同：
-     *   type  @ +4   (0x00100010 按键, 15 触摸)
-     *   按键:  state @ +28 (16 按下 / 0x100000 抬起), scan @ +34 (u16)
-     *   触摸:  count @ +24 (u16), item i @ 28+12i: action @ +0 (1/2/8) */
+    /* 判据照 keymon（真机实测）：不看 +4 的 type。
+     *   w7 = *(u32*)(ev+28):  16 按下 / 0x100000 抬起；触摸 1/2/8
+     *   w8 = *(u32*)(ev+32):  按键时 scan 在高 16 位
+     */
     unsigned char* e = reinterpret_cast<unsigned char*>(evp);
     if (!prime_get_event(evp)) {
         return;
     }
-    const std::uint32_t type = *reinterpret_cast<std::uint32_t*>(e + 4);
-    if (type == 0x00100010U) {
-        const std::uint32_t state = *reinterpret_cast<std::uint32_t*>(e + 28);
-        const unsigned scan = *reinterpret_cast<unsigned short*>(e + 34);
-        if (state == 16U) {                     /* press (release = 0x100000) */
-            const InputEvent ev = map_scan_code(scan);
-            if (ev.type != InputEventType::None) {
-                g_pending = static_cast<int>(ev.type);
-            }
+    const std::uint32_t w7 = *reinterpret_cast<std::uint32_t*>(e + 28);
+    const std::uint32_t w8 = *reinterpret_cast<std::uint32_t*>(e + 32);
+    if (w7 == 16U) {                            /* key press */
+        const unsigned scan = w8 >> 16;
+        const InputEvent ev = map_scan_code(scan);
+        if (ev.type != InputEventType::None) {
+            g_pending = static_cast<int>(ev.type);
         }
-    } else if (type == 15U) {                   /* touch */
-        const unsigned count = *reinterpret_cast<unsigned short*>(e + 24);
-        if (count > 0) {
-            const std::uint32_t action = *reinterpret_cast<std::uint32_t*>(e + 28);
-            if (action == 1U) {                 /* press */
-                g_pending = static_cast<int>(InputEventType::Activate);
-            }
-        }
+    } else if (w7 == 1U) {                      /* touch press -> 下一页 */
+        g_pending = static_cast<int>(InputEventType::Activate);
     }
 }
 
