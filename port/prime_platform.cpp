@@ -295,7 +295,6 @@ namespace {
 
 /* 事件线程函数: ClearAllEvents + 阻塞 GetEvent → 解析 → 写共享状态 */
 int event_thread_fn(void*) {
-    prime_clear_all_events();  // eventg1 同款
     std::uint32_t buf[18];     // ui_event_t 完整结构 (eventg1 打印到 ptr[16])
     bool t_down = false;
     int t_x0 = 0, t_y0 = 0;

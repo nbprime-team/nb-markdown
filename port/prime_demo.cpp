@@ -114,16 +114,32 @@ extern "C" int prime_render_demo_page(void) {
 /* ---------- ELF 入口 (eventg1 权威结构) ----------
  * eventg1 main() 同款: 在 call 上下文直接 OSCreateThread 事件线程,
  * SetSystemVariable(85,2,1), 然后主线程轮询共享事件状态并做自己的工作。 */
-extern "C" void* app_entry(PrimeBootConfig* cfg) {
+extern "C" void* app_entry_c(PrimeBootConfig* cfg);
+
+/* 入口包装（nbCode 同款）：调用上下文只保证 4 字节 SP，而 GCC 假定 AAPCS 的
+ * 8 字节对齐，会在函数里用 LDRD/STRD；ARM926 对非对齐的这类访问 data abort
+ * → 整机复位。这里先保存 callee-saved、把 SP 对齐到 8，再进 C 代码。 */
+extern "C" __attribute__((naked)) void* app_entry(PrimeBootConfig* cfg) {
+    (void)cfg;
+    __asm__ volatile(
+        "push {r4, r5, r6, r7, r8, r9, r10, r11, ip, lr}\n"
+        "bic  sp, sp, #7\n"
+        "sub  sp, sp, #8\n"
+        "bl   app_entry_c\n"
+        "add  sp, sp, #8\n"
+        "pop  {r4, r5, r6, r7, r8, r9, r10, r11, ip, pc}\n");
+}
+
+extern "C" void* app_entry_c(PrimeBootConfig* cfg) {
     if (cfg == nullptr || cfg->magic != 0xD00BC760u) {
         return nullptr;
     }
     prime_set_services(reinterpret_cast<const PrimeServices*>(
         static_cast<std::uintptr_t>(cfg->services)));
 
-    /* 输入走主线程 GetEvent（prime_render_wait_key 内部轮询），
-     * 不再创建事件线程——线程版在真机上画面正常但收不到按键。 */
-    prime_clear_all_events();
+    /* 输入走主线程 GetEvent（prime_render_wait_key 内部轮询）。
+     * 不在调用上下文里 ClearAllEvents：真机上这一步会导致复位，
+     * 事件由 GetEvent 自然排空。 */
 
     /* doom/eventg1 同款前置: 关系统电源管理 + 清屏 */
     prime_set_system_variable(85u /* SYSVAR_SYSPWCTRL */, 2u /* SET */,
@@ -210,7 +226,6 @@ extern "C" void* app_entry(PrimeBootConfig* cfg) {
     }
 
     clear_screen_on_exit();
-    prime_clear_all_events();
     prime_log_write("PrimeTeX 演示结束\n");
     return prime_log_struct();
 }
