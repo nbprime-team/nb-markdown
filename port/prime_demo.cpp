@@ -114,7 +114,24 @@ extern "C" int prime_render_demo_page(void) {
 /* ---------- ELF 入口 (eventg1 权威结构) ----------
  * eventg1 main() 同款: 在 call 上下文直接 OSCreateThread 事件线程,
  * SetSystemVariable(85,2,1), 然后主线程轮询共享事件状态并做自己的工作。 */
-extern "C" void* app_entry_c(PrimeBootConfig* cfg);
+extern "C" void* demo_main(void* arg);
+
+/* 入口只做"校验 + 起线程"：调试调用上下文的栈很小，初始化 FreeType/HarfBuzz
+ * 会在入口直接溢出复位。主循环放到带显式栈大小的线程里（eventg1/doom 同款）。 */
+extern "C" void* app_entry_c(PrimeBootConfig* cfg) {
+    if (cfg == nullptr || cfg->magic != 0xD00BC760u) {
+        return nullptr;
+    }
+    prime_set_services(reinterpret_cast<const PrimeServices*>(
+        static_cast<std::uintptr_t>(cfg->services)));
+    void* thr = prime_os_create_thread(reinterpret_cast<void*>(&demo_main), cfg,
+                                       96u * 1024u, 0u);
+    if (thr == nullptr) {
+        /* 线程创建失败: 退回调用上下文执行（可能复位，但至少能跑） */
+        return demo_main(cfg);
+    }
+    return nullptr;
+}
 
 /* 入口包装（nbCode 同款）：调用上下文只保证 4 字节 SP，而 GCC 假定 AAPCS 的
  * 8 字节对齐，会在函数里用 LDRD/STRD；ARM926 对非对齐的这类访问 data abort
@@ -130,7 +147,8 @@ extern "C" __attribute__((naked)) void* app_entry(PrimeBootConfig* cfg) {
         "pop  {r4, r5, r6, r7, r8, r9, r10, r11, ip, pc}\n");
 }
 
-extern "C" void* app_entry_c(PrimeBootConfig* cfg) {
+extern "C" void* demo_main(void* arg) {
+    PrimeBootConfig* cfg = reinterpret_cast<PrimeBootConfig*>(arg);
     if (cfg == nullptr || cfg->magic != 0xD00BC760u) {
         return nullptr;
     }
