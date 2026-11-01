@@ -268,13 +268,21 @@ extern "C" void* demo_main(void* arg) {
             break;
         }
         if (key == kActivate || key == kScrollDown) {
-            ++page;
+            if (page + 1 < kPageCount) {      /* 末页停住，不越界退出 */
+                ++page;
+            }
         } else if (key == kScrollUp) {
-            --page;
+            if (page > 0) {
+                --page;
+            }
         }
         /* 其他键: 忽略 */
     }
 
+    /* 退出前把固件状态还回去：清事件、恢复电源管理、摘钩子 */
+    prime_hook_remove();
+    prime_clear_all_events();
+    prime_set_system_variable(85u, 2u, 0u);
     clear_screen_on_exit();
     prime_log_write("PrimeTeX 演示结束\n");
     g_demo_done = 1;
