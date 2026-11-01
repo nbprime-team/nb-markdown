@@ -135,34 +135,25 @@ static void input_restore(void) {
 
 /* 入口只做"校验 + 起线程"：调试调用上下文的栈很小，初始化 FreeType/HarfBuzz
  * 会在入口直接溢出复位。主循环放到带显式栈大小的线程里（eventg1/doom 同款）。 */
-/* 在入口线程内切换到自备大栈：事件分发在入口线程，栈又不能太小。 */
-extern "C" __attribute__((naked)) void* run_on_stack(void* sp, void* arg) {
-    (void)sp; (void)arg;
-    __asm__ volatile(
-        "push {r4, r5, r6, r7, r8, r9, r10, r11, ip, lr}\n"
-        "mov  r4, sp\n"
-        "mov  sp, r0\n"
-        "mov  r0, r1\n"
-        "bl   demo_main\n"
-        "mov  sp, r4\n"
-        "pop  {r4, r5, r6, r7, r8, r9, r10, r11, ip, pc}\n");
-}
-
 extern "C" void* app_entry_c(PrimeBootConfig* cfg) {
     if (cfg == nullptr || cfg->magic != 0xD00BC760u) {
         return nullptr;
     }
     prime_set_services(reinterpret_cast<const PrimeServices*>(
         static_cast<std::uintptr_t>(cfg->services)));
-    /* 主循环必须在入口线程上跑：固件的事件分发就在这个线程，
-     * 新建线程会让 hook 永远收不到事件（nbCode 也是同线程循环）。 */
-    input_install();
-    void* st = prime_lmalloc(96u * 1024u);
-    if (st != nullptr) {
-        std::uintptr_t top = (reinterpret_cast<std::uintptr_t>(st) + 96u * 1024u) & ~7u;
-        return run_on_stack(reinterpret_cast<void*>(top), cfg);
+    g_demo_done = 0;
+    void* thr = prime_os_create_thread(reinterpret_cast<void*>(&demo_main), cfg,
+                                       96u * 1024u, 0u);
+    if (thr == nullptr) {
+        /* 线程创建失败: 退回调用上下文执行（可能复位，但至少能跑） */
+        return demo_main(cfg);
     }
-    return demo_main(cfg);
+    /* 不能立刻返回: 启动器会在返回后释放/复用映像，而线程还在跑。
+     * 等主循环结束（demo_main 末尾置 g_demo_done）。 */
+    while (!g_demo_done) {
+        prime_os_sleep(50);
+    }
+    return nullptr;
 }
 
 /* 入口包装（nbCode 同款）：调用上下文只保证 4 字节 SP，而 GCC 假定 AAPCS 的
