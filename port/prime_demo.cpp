@@ -132,6 +132,10 @@ static void input_restore(void) {
 /* 入口只做"校验 + 起线程"：调试调用上下文的栈很小，初始化 FreeType/HarfBuzz
  * 会在入口直接溢出复位。主循环放到带显式栈大小的线程里（eventg1/doom 同款）。 */
 extern "C" void* malloc(unsigned size);
+extern "C" volatile unsigned g_dbg_w7;
+extern "C" volatile unsigned g_dbg_w8;
+extern "C" volatile int g_dbg_n;
+static int g_stack_entry;
 
 /* 入口线程内切到自备栈：事件在入口线程分发，栈又不能太小。 */
 extern "C" __attribute__((naked)) void* run_on_stack(void* sp, void* arg) {
@@ -250,7 +254,35 @@ extern "C" void* demo_main(void* arg) {
         prime_log_int(prime_render_count_ink(kBackground));
         prime_log_write("\n");
 
-        const int key = prime_render_wait_key(kTimeoutMs);
+        int key = 0;
+        {
+            int waited = 0;
+            while (waited < kTimeoutMs) {
+                key = prime_render_wait_key(500);
+                {
+                    char b[64];
+                    int n = 0;
+                    const char* pfx = "h=";
+                    while (*pfx) b[n++] = *pfx++;
+                    n += 1; b[n-1] = (char)('0' + (g_dbg_n % 10));
+                    pfx = " w7=";
+                    while (*pfx) b[n++] = *pfx++;
+                    for (int sh = 28; sh >= 0; sh -= 4) {
+                        int d = (g_dbg_w7 >> sh) & 0xF;
+                        b[n++] = (char)(d < 10 ? '0' + d : 'a' + d - 10);
+                    }
+                    pfx = " st=";
+                    while (*pfx) b[n++] = *pfx++;
+                    b[n++] = (char)('0' + g_stack_entry);
+                    b[n] = 0;
+                    prime_render_text(b, 4, 226, 10, kInk, kBackground, 0);
+                    prime_render_present();
+                }
+                if (key != 0) break;
+                waited += 500;
+                if (key == 0 && waited >= kTimeoutMs) break;
+            }
+        }
 #ifdef PRIMETEX_EVENT_DIAG
         prime_log_write("[ev] 等待结果 key=");
         prime_log_int(key);

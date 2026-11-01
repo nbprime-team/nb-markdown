@@ -345,6 +345,12 @@ int event_thread_fn(void*) {
 
 /* 主线程非阻塞取一个事件（路线 A 使用；Upsilon 路线不需要）。
  * 返回事件类型；-2 = 无事件；触摸按下/抬起之间的滑动在这里合成。 */
+extern "C" volatile unsigned g_dbg_w7;
+extern "C" volatile unsigned g_dbg_w8;
+extern "C" volatile int g_dbg_n;
+volatile unsigned g_dbg_w7;
+volatile unsigned g_dbg_w8;
+volatile int g_dbg_n;
 static volatile int g_pending;      /* 解码后的事件类型，0 = 无 */
 static volatile int g_touch_down;
 static volatile int g_tx0, g_ty0;
@@ -414,6 +420,9 @@ extern "C" void prime_input_hook(void* evp) {
         return;
     }
     const std::uint32_t w7 = *reinterpret_cast<std::uint32_t*>(e + 28);
+    g_dbg_w7 = w7;
+    g_dbg_w8 = *reinterpret_cast<std::uint32_t*>(e + 32);
+    g_dbg_n++;
     const std::uint32_t w8 = *reinterpret_cast<std::uint32_t*>(e + 32);
     if (w7 == 16U) {                            /* key press */
         const unsigned scan = w8 >> 16;
