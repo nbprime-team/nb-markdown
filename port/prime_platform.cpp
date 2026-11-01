@@ -345,11 +345,11 @@ int event_thread_fn(void*) {
 
 /* 主线程非阻塞取一个事件（路线 A 使用；Upsilon 路线不需要）。
  * 返回事件类型；-2 = 无事件；触摸按下/抬起之间的滑动在这里合成。 */
-extern "C" volatile unsigned g_dbg_w7;
-extern "C" volatile unsigned g_dbg_w8;
-extern "C" volatile int g_dbg_n;
-extern "C" volatile unsigned g_dbg_scan;
-extern "C" volatile int g_dbg_ev;
+extern "C" volatile unsigned g_dbg_w7 = 0;
+extern "C" volatile unsigned g_dbg_w8 = 0;
+extern "C" volatile int g_dbg_n = 0;
+extern "C" volatile unsigned g_dbg_scan = 0;
+extern "C" volatile int g_dbg_ev = 0;
 static volatile int g_pending;      /* 解码后的事件类型，0 = 无 */
 static volatile int g_touch_down;
 static volatile int g_tx0, g_ty0;
