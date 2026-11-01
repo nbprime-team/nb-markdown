@@ -159,18 +159,11 @@ extern "C" void* app_entry_c(PrimeBootConfig* cfg) {
     prime_set_services(reinterpret_cast<const PrimeServices*>(
         static_cast<std::uintptr_t>(cfg->services)));
     g_demo_done = 0;
-    void* thr = prime_os_create_thread(reinterpret_cast<void*>(&demo_main), cfg,
-                                       96u * 1024u, 0u);
-    if (thr == nullptr) {
-        /* 线程创建失败: 退回调用上下文执行（可能复位，但至少能跑） */
-        return demo_main(cfg);
-    }
-    /* 不能立刻返回: 启动器会在返回后释放/复用映像，而线程还在跑。
-     * 等主循环结束（demo_main 末尾置 g_demo_done）。 */
-    while (!g_demo_done) {
-        prime_os_sleep(50);
-    }
-    return nullptr;
+    input_install();                    /* SDK prime_hook_install */
+    std::uintptr_t top = (reinterpret_cast<std::uintptr_t>(g_big_stack) +
+                          sizeof(g_big_stack)) & ~7u;
+    g_stack_entry = 1;
+    return run_on_stack(reinterpret_cast<void*>(top), cfg);
 }
 
 /* 入口包装（nbCode 同款）：调用上下文只保证 4 字节 SP，而 GCC 假定 AAPCS 的
